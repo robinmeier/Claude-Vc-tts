@@ -4,64 +4,15 @@ Usage:
     uv run tts sourcevoice.wav speech.txt
     uv run tts sourcevoice.wav "Hello world" -e 0.8 -o out.wav
     uv run tts sourcevoice.wav speech.txt --whisper
-    uv run tts --list-tags
 """
 
-import argparse
-import os
 import sys
+from pathlib import Path
 
 
-PARALINGUISTIC_TAGS = {
-    "laugh": "[laugh]",
-    "chuckle": "[chuckle]",
-    "sigh": "[sigh]",
-    "cough": "[cough]",
-    "whisper": "[whisper]",
-    "clear_throat": "[clears throat]",
-    "breath": "[breath]",
-    "hesitation": "[hesitation]",
-}
+def build_parser():
+    import argparse
 
-# Whisper mode parameter presets (also prepends [whisper] tag)
-WHISPER_EXAGGERATION = 0.1
-WHISPER_CFG_WEIGHT = 0.2
-
-
-def auto_device() -> str:
-    try:
-        import torch
-        if torch.cuda.is_available():
-            return "cuda"
-        if torch.backends.mps.is_available():
-            return "mps"
-    except ImportError:
-        pass
-    return "cpu"
-
-
-def load_text(text_arg: str) -> str:
-    """Load text from a file path or return as-is if it's an inline string."""
-    if text_arg.endswith(".txt") and os.path.isfile(text_arg):
-        with open(text_arg, "r", encoding="utf-8") as f:
-            return f.read().strip()
-    return text_arg
-
-
-def build_text(text: str, tags: list[str] | None) -> str:
-    """Append any requested paralinguistic tags to the text."""
-    if not tags:
-        return text
-    tag_strs = []
-    for tag in tags:
-        if tag in PARALINGUISTIC_TAGS:
-            tag_strs.append(PARALINGUISTIC_TAGS[tag])
-        else:
-            print(f"Warning: unknown tag '{tag}', ignoring. Use --list-tags to see valid tags.", file=sys.stderr)
-    return text + " " + " ".join(tag_strs) if tag_strs else text
-
-
-def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="tts",
         description="Clone a voice and synthesize speech with style control.",
@@ -70,32 +21,24 @@ def build_parser() -> argparse.ArgumentParser:
 Examples:
   uv run tts voice.wav speech.txt
   uv run tts voice.wav "Hello world" -e 0.9 -o out.wav
-  uv run tts voice.wav speech.txt --whisper
-  uv run tts voice.wav "That's funny [laugh]" --tags laugh
-  uv run tts --list-tags
+  uv run tts voice.wav speech.txt --whisper -o whisper.wav
+  uv run tts voice.wav speech.txt -e 1.5 -c 0.3 -t 1.2 -s 0.9
         """,
     )
 
     parser.add_argument(
-        "--list-tags",
-        action="store_true",
-        help="Print available paralinguistic tags and exit.",
-    )
-
-    parser.add_argument(
         "source_voice",
-        nargs="?",
-        help="Path to reference WAV file (voice to clone).",
+        type=Path,
+        help="Reference WAV file for voice cloning (10+ seconds recommended).",
     )
     parser.add_argument(
         "text",
-        nargs="?",
         help="Text to synthesize: path to .txt file or inline string.",
     )
-
     parser.add_argument(
         "-o", "--output",
-        default="output.wav",
+        type=Path,
+        default=Path("output.wav"),
         help="Output WAV file path (default: output.wav).",
     )
     parser.add_argument(
@@ -103,137 +46,142 @@ Examples:
         type=float,
         default=0.5,
         metavar="FLOAT",
-        help="Emotional expressiveness: 0.0 (flat), 0.5 (normal), 1.0+ (exaggerated, max ~2.0). Default: 0.5.",
-    )
-    parser.add_argument(
-        "-t", "--temperature",
-        type=float,
-        default=0.8,
-        metavar="FLOAT",
-        help="Voice randomness: 0.5-0.7 (consistent), 1.0-1.5 (expressive). Default: 0.8.",
+        help="Emotion intensity: 0.25 (flat) → 0.5 (normal) → 2.0 (exaggerated). Default: 0.5.",
     )
     parser.add_argument(
         "-c", "--cfg-weight",
         type=float,
         default=0.5,
         metavar="FLOAT",
-        help="CFG guidance weight 0.0 (variable) to 1.0 (controlled). Default: 0.5.",
+        help="CFG guidance 0.0–1.0: lower = slower/softer pacing. Default: 0.5.",
+    )
+    parser.add_argument(
+        "-t", "--temperature",
+        type=float,
+        default=0.8,
+        metavar="FLOAT",
+        help="Sampling temperature 0.05–5.0: lower = more consistent voice. Default: 0.8.",
     )
     parser.add_argument(
         "-s", "--speed",
         type=float,
         default=1.0,
         metavar="FLOAT",
-        help="Speaking speed multiplier (default: 1.0). Not yet supported by Chatterbox.",
+        help="Playback speed multiplier 0.5–2.0 (default: 1.0).",
     )
     parser.add_argument(
         "-w", "--whisper",
         action="store_true",
-        help=f"Whisper mode: prepends [whisper] tag and sets exaggeration={WHISPER_EXAGGERATION}, cfg-weight={WHISPER_CFG_WEIGHT}.",
+        help="Whisper mode: sets soft defaults for exaggeration, cfg-weight, and temperature.",
     )
     parser.add_argument(
-        "-d", "--device",
-        default=None,
-        choices=["cpu", "cuda", "mps"],
-        help="Device to run on (default: auto-detect).",
+        "--device",
+        choices=["cpu", "cuda", "mps", "auto"],
+        default="auto",
+        help="Compute device (default: auto-detect).",
     )
     parser.add_argument(
-        "--tags",
-        nargs="+",
-        metavar="TAG",
-        help="Paralinguistic tags to append to text (e.g. --tags laugh sigh). Use --list-tags for options.",
+        "--min-p",
+        type=float,
+        default=0.05,
+        help="Min-p sampling threshold (default: 0.05).",
+    )
+    parser.add_argument(
+        "--top-p",
+        type=float,
+        default=1.0,
+        help="Top-p nucleus sampling (default: 1.0).",
+    )
+    parser.add_argument(
+        "--repetition-penalty",
+        type=float,
+        default=1.2,
+        help="Repetition penalty (default: 1.2).",
+    )
+    parser.add_argument(
+        "--no-normalize",
+        action="store_true",
+        help="Skip loudness normalization of output audio.",
     )
 
     return parser
 
 
-def generate(
-    source_voice: str,
-    text: str,
-    output: str,
-    exaggeration: float,
-    cfg_weight: float,
-    temperature: float,
-    device: str,
-) -> None:
-    try:
-        from chatterbox.tts import ChatterboxTTS
-        import torchaudio
-    except ImportError:
-        print(
-            "Error: chatterbox-tts is not installed.\n"
-            "Run: uv sync  (or pip install chatterbox-tts torchaudio)",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+def validate_args(args, parser) -> None:
+    if not args.source_voice.exists():
+        parser.error(f"Source voice file not found: {args.source_voice}")
+    if args.source_voice.suffix.lower() != ".wav":
+        parser.error(f"source_voice must be a .wav file, got: {args.source_voice}")
+    if not (0.25 <= args.exaggeration <= 2.0):
+        parser.error("--exaggeration must be between 0.25 and 2.0")
+    if not (0.0 <= args.cfg_weight <= 1.0):
+        parser.error("--cfg-weight must be between 0.0 and 1.0")
+    if not (0.05 <= args.temperature <= 5.0):
+        parser.error("--temperature must be between 0.05 and 5.0")
+    if not (0.5 <= args.speed <= 2.0):
+        parser.error("--speed must be between 0.5 and 2.0")
 
-    print(f"Loading model on {device}... (first run downloads ~1-2 GB from HuggingFace)", file=sys.stderr)
-    model = ChatterboxTTS.from_pretrained(device=device)
 
-    print("Generating speech...", file=sys.stderr)
-    wav = model.generate(
-        text=text,
-        audio_prompt_path=source_voice,
-        exaggeration=exaggeration,
-        cfg_weight=cfg_weight,
-        temperature=temperature,
-    )
-
-    torchaudio.save(output, wav, model.sr)
-    print(f"Saved: {output}", file=sys.stderr)
+def load_text(text_arg: str) -> str:
+    """Return text from file if arg is an existing .txt path, else use as-is."""
+    p = Path(text_arg)
+    if p.suffix.lower() == ".txt" and p.exists():
+        content = p.read_text(encoding="utf-8").strip()
+        if not content:
+            print(f"Error: text file is empty: {p}", file=sys.stderr)
+            sys.exit(1)
+        return content
+    return text_arg.strip()
 
 
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
+    validate_args(args, parser)
 
-    if args.list_tags:
-        print("Available paralinguistic tags (use with --tags or inline in text):")
-        for name, tag in PARALINGUISTIC_TAGS.items():
-            print(f"  {name:<15} -> {tag}")
-        return
+    text = load_text(args.text)
 
-    if not args.source_voice or not args.text:
-        parser.error("source_voice and text are required (unless using --list-tags).")
+    # Deferred imports: keeps `uv run tts --help` instant (torch takes ~3s to import)
+    from tts_vc.engine import detect_device, load_model, resolve_params, synthesize
+    from tts_vc.audio import apply_speed, normalize_loudness, save_wav
 
-    if not os.path.isfile(args.source_voice):
-        parser.error(f"Source voice file not found: {args.source_voice}")
+    device = detect_device() if args.device == "auto" else args.device
 
-    exaggeration = args.exaggeration
-    cfg_weight = args.cfg_weight
+    print(f"Loading Chatterbox model on {device}... (first run downloads ~2 GB)", file=sys.stderr)
+    model = load_model(device)
 
+    params = resolve_params(
+        exaggeration=args.exaggeration,
+        cfg_weight=args.cfg_weight,
+        temperature=args.temperature,
+        whisper=args.whisper,
+    )
     if args.whisper:
-        exaggeration = WHISPER_EXAGGERATION
-        cfg_weight = WHISPER_CFG_WEIGHT
         print(
-            f"Whisper mode: exaggeration={exaggeration}, cfg_weight={cfg_weight}, prepending [whisper] tag",
+            f"Whisper mode: exaggeration={params['exaggeration']}, "
+            f"cfg_weight={params['cfg_weight']}, temperature={params['temperature']}",
             file=sys.stderr,
         )
 
-    if exaggeration < 0.0:
-        parser.error("--exaggeration must be >= 0.0")
-    if not 0.0 <= cfg_weight <= 1.0:
-        parser.error("--cfg-weight must be between 0.0 and 1.0")
-    if not 0.05 <= args.temperature <= 2.0:
-        parser.error("--temperature must be between 0.05 and 2.0")
-    if args.speed != 1.0:
-        print("Warning: --speed is not yet implemented by Chatterbox; ignored.", file=sys.stderr)
-
-    device = args.device or auto_device()
-    text = load_text(args.text)
-    if args.whisper:
-        text = f"[whisper] {text}"
-    text = build_text(text, args.tags)
-
-    generate(
-        source_voice=args.source_voice,
+    print(f"Synthesizing {len(text)} characters...", file=sys.stderr)
+    wav, sr = synthesize(
+        model=model,
         text=text,
-        output=args.output,
-        exaggeration=exaggeration,
-        cfg_weight=cfg_weight,
-        temperature=args.temperature,
-        device=device,
+        audio_prompt_path=str(args.source_voice),
+        **params,
+        min_p=args.min_p,
+        top_p=args.top_p,
+        repetition_penalty=args.repetition_penalty,
     )
+
+    if args.speed != 1.0:
+        wav = apply_speed(wav, sr, args.speed)
+
+    if not args.no_normalize:
+        wav = normalize_loudness(wav)
+
+    save_wav(wav, sr, str(args.output))
+    print(f"Saved: {args.output}", file=sys.stderr)
 
 
 if __name__ == "__main__":
