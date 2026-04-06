@@ -17,12 +17,13 @@ PARALINGUISTIC_TAGS = {
     "chuckle": "[chuckle]",
     "sigh": "[sigh]",
     "cough": "[cough]",
+    "whisper": "[whisper]",
     "clear_throat": "[clears throat]",
     "breath": "[breath]",
     "hesitation": "[hesitation]",
 }
 
-# Whisper mode parameter presets
+# Whisper mode parameter presets (also prepends [whisper] tag)
 WHISPER_EXAGGERATION = 0.1
 WHISPER_CFG_WEIGHT = 0.2
 
@@ -102,7 +103,14 @@ Examples:
         type=float,
         default=0.5,
         metavar="FLOAT",
-        help="Emotional expressiveness 0.0 (flat) to 1.0 (very expressive). Default: 0.5.",
+        help="Emotional expressiveness: 0.0 (flat), 0.5 (normal), 1.0+ (exaggerated, max ~2.0). Default: 0.5.",
+    )
+    parser.add_argument(
+        "-t", "--temperature",
+        type=float,
+        default=0.8,
+        metavar="FLOAT",
+        help="Voice randomness: 0.5-0.7 (consistent), 1.0-1.5 (expressive). Default: 0.8.",
     )
     parser.add_argument(
         "-c", "--cfg-weight",
@@ -121,7 +129,7 @@ Examples:
     parser.add_argument(
         "-w", "--whisper",
         action="store_true",
-        help=f"Whisper mode: sets exaggeration={WHISPER_EXAGGERATION}, cfg-weight={WHISPER_CFG_WEIGHT}.",
+        help=f"Whisper mode: prepends [whisper] tag and sets exaggeration={WHISPER_EXAGGERATION}, cfg-weight={WHISPER_CFG_WEIGHT}.",
     )
     parser.add_argument(
         "-d", "--device",
@@ -145,6 +153,7 @@ def generate(
     output: str,
     exaggeration: float,
     cfg_weight: float,
+    temperature: float,
     device: str,
 ) -> None:
     try:
@@ -161,12 +170,13 @@ def generate(
     print(f"Loading model on {device}... (first run downloads ~1-2 GB from HuggingFace)", file=sys.stderr)
     model = ChatterboxTTS.from_pretrained(device=device)
 
-    print(f"Generating speech...", file=sys.stderr)
+    print("Generating speech...", file=sys.stderr)
     wav = model.generate(
         text=text,
         audio_prompt_path=source_voice,
         exaggeration=exaggeration,
         cfg_weight=cfg_weight,
+        temperature=temperature,
     )
 
     torchaudio.save(output, wav, model.sr)
@@ -196,19 +206,23 @@ def main() -> None:
         exaggeration = WHISPER_EXAGGERATION
         cfg_weight = WHISPER_CFG_WEIGHT
         print(
-            f"Whisper mode: exaggeration={exaggeration}, cfg_weight={cfg_weight}",
+            f"Whisper mode: exaggeration={exaggeration}, cfg_weight={cfg_weight}, prepending [whisper] tag",
             file=sys.stderr,
         )
 
-    if not 0.0 <= exaggeration <= 1.0:
-        parser.error("--exaggeration must be between 0.0 and 1.0")
+    if exaggeration < 0.0:
+        parser.error("--exaggeration must be >= 0.0")
     if not 0.0 <= cfg_weight <= 1.0:
         parser.error("--cfg-weight must be between 0.0 and 1.0")
+    if not 0.05 <= args.temperature <= 2.0:
+        parser.error("--temperature must be between 0.05 and 2.0")
     if args.speed != 1.0:
         print("Warning: --speed is not yet implemented by Chatterbox; ignored.", file=sys.stderr)
 
     device = args.device or auto_device()
     text = load_text(args.text)
+    if args.whisper:
+        text = f"[whisper] {text}"
     text = build_text(text, args.tags)
 
     generate(
@@ -217,6 +231,7 @@ def main() -> None:
         output=args.output,
         exaggeration=exaggeration,
         cfg_weight=cfg_weight,
+        temperature=args.temperature,
         device=device,
     )
 

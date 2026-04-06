@@ -78,6 +78,7 @@ def test_parser_defaults():
     assert args.output == "output.wav"
     assert args.exaggeration == 0.5
     assert args.cfg_weight == 0.5
+    assert args.temperature == 0.8
     assert args.speed == 1.0
     assert args.whisper is False
     assert args.device is None
@@ -118,14 +119,9 @@ def test_parser_list_tags():
 # ---------------------------------------------------------------------------
 
 def test_whisper_mode_overrides_exaggeration_and_cfg(tmp_path):
-    """main() applies whisper overrides when --whisper is passed."""
+    """main() applies whisper overrides and prepends [whisper] tag."""
     voice = tmp_path / "v.wav"
     voice.write_bytes(b"RIFF")  # dummy file so os.path.isfile passes
-
-    mock_wav = MagicMock()
-    mock_model = MagicMock()
-    mock_model.generate.return_value = mock_wav
-    mock_model.sr = 24000
 
     with patch("tts_vc.cli.generate") as mock_generate:
         sys.argv = ["tts", str(voice), "Hello", "--whisper"]
@@ -136,6 +132,7 @@ def test_whisper_mode_overrides_exaggeration_and_cfg(tmp_path):
     call_kwargs = mock_generate.call_args
     assert call_kwargs.kwargs["exaggeration"] == WHISPER_EXAGGERATION
     assert call_kwargs.kwargs["cfg_weight"] == WHISPER_CFG_WEIGHT
+    assert call_kwargs.kwargs["text"].startswith("[whisper]")
 
 
 # ---------------------------------------------------------------------------
