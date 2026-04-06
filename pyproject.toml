@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tts-vc"
+version = "0.1.0"
+requires-python = ">=3.10"
+description = "Voice cloning TTS CLI using Chatterbox"
+dependencies = [
+    "chatterbox-tts",
+    "torchaudio",
+]
+
+[project.scripts]
+tts = "tts_vc.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tts_vc"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
