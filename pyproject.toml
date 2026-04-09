@@ -10,6 +10,7 @@ description = "Voice cloning TTS CLI using Chatterbox"
 dependencies = [
     "chatterbox-tts",
     "torchaudio",
+    "resemble-perth",
 ]
 
 [project.scripts]
