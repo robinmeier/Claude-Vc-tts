@@ -30,8 +30,27 @@ def detect_device() -> str:
     return "cpu"
 
 
+def _patch_perth() -> None:
+    """Patch perth.PerthImplicitWatermarker with a no-op if it failed to load.
+
+    On Mac (MPS/CPU), the resemble-perth native extension often fails to build,
+    leaving PerthImplicitWatermarker set to None. Chatterbox still works fine
+    without watermarking — we just skip it silently.
+    """
+    try:
+        import perth
+        if perth.PerthImplicitWatermarker is None:
+            class _NoOpWatermarker:
+                def apply_watermark(self, wav, sample_rate=None):
+                    return wav
+            perth.PerthImplicitWatermarker = _NoOpWatermarker
+    except ImportError:
+        pass
+
+
 def load_model(device: str) -> "ChatterboxTTS":
     """Load ChatterboxTTS from HuggingFace (downloads ~2GB on first run)."""
+    _patch_perth()
     try:
         from chatterbox.tts import ChatterboxTTS
     except ImportError:
