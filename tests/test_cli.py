@@ -8,8 +8,8 @@ import pytest
 import torch
 
 from tts_vc.audio import apply_speed, normalize_loudness, save_wav
-from tts_vc.cli import build_parser, load_text, validate_args
-from tts_vc.engine import DEFAULTS, WHISPER_OVERRIDES, resolve_params
+from tts_vc.cli import PARALINGUISTIC_TAGS, build_parser, build_text, load_text, validate_args
+from tts_vc.engine import DEFAULTS, MULTILINGUAL_LANGUAGES, WHISPER_OVERRIDES, resolve_params
 
 
 # ---------------------------------------------------------------------------
@@ -58,6 +58,9 @@ def test_parser_defaults(tmp_path):
     assert args.repetition_penalty == 1.2
     assert args.no_normalize is False
     assert str(args.output) == "output.wav"
+    assert args.model == "standard"
+    assert args.language == "en"
+    assert args.tags is None
 
 
 def test_parser_short_flags(tmp_path):
@@ -224,6 +227,85 @@ def test_save_wav_1d_tensor(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# build_text / --tags
+# ---------------------------------------------------------------------------
+
+def test_build_text_no_tags():
+    assert build_text("Hello", None) == "Hello"
+    assert build_text("Hello", []) == "Hello"
+
+
+def test_build_text_known_tag():
+    result = build_text("Hello", ["laugh"])
+    assert result == "Hello [laugh]"
+
+
+def test_build_text_multiple_tags():
+    result = build_text("Hello", ["laugh", "sigh"])
+    assert "[laugh]" in result
+    assert "[sigh]" in result
+
+
+def test_build_text_unknown_tag_warns_and_skips(capsys):
+    result = build_text("Hello", ["nonexistent"])
+    captured = capsys.readouterr()
+    assert "unknown tag" in captured.err
+    assert result == "Hello"
+
+
+def test_parser_tags_flag(tmp_path):
+    voice = tmp_path / "v.wav"
+    voice.write_bytes(b"x")
+    parser = build_parser()
+    args = parser.parse_args([str(voice), "Hello", "--tags", "laugh", "sigh"])
+    assert args.tags == ["laugh", "sigh"]
+
+
+# ---------------------------------------------------------------------------
+# --model and --language
+# ---------------------------------------------------------------------------
+
+def test_parser_model_multilingual(tmp_path):
+    voice = tmp_path / "v.wav"
+    voice.write_bytes(b"x")
+    parser = build_parser()
+    args = parser.parse_args([str(voice), "Bonjour", "--model", "multilingual", "-l", "fr"])
+    assert args.model == "multilingual"
+    assert args.language == "fr"
+
+
+def test_validate_unknown_language_exits(tmp_path):
+    voice = tmp_path / "v.wav"
+    voice.write_bytes(b"x")
+    parser = build_parser()
+    args = parser.parse_args([str(voice), "Hello", "--model", "multilingual", "-l", "xx"])
+    with pytest.raises(SystemExit):
+        validate_args(args, parser)
+
+
+def test_all_multilingual_languages_valid(tmp_path):
+    voice = tmp_path / "v.wav"
+    voice.write_bytes(b"x")
+    parser = build_parser()
+    for lang in MULTILINGUAL_LANGUAGES:
+        args = parser.parse_args([str(voice), "Hello", "--model", "multilingual", "-l", lang])
+        validate_args(args, parser)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# --list-tags
+# ---------------------------------------------------------------------------
+
+def test_list_tags_output(capsys):
+    with patch("sys.argv", ["tts", "--list-tags"]):
+        from tts_vc.cli import main
+        main()
+    captured = capsys.readouterr()
+    for name in PARALINGUISTIC_TAGS:
+        assert name in captured.out
+
+
+# ---------------------------------------------------------------------------
 # Integration test (model mocked at engine level)
 # ---------------------------------------------------------------------------
 
@@ -270,3 +352,45 @@ def test_main_whisper_mode(tmp_path):
     assert call_kwargs["exaggeration"] == WHISPER_OVERRIDES["exaggeration"]
     assert call_kwargs["cfg_weight"] == WHISPER_OVERRIDES["cfg_weight"]
     assert call_kwargs["temperature"] == WHISPER_OVERRIDES["temperature"]
+
+
+def test_main_tags_appended_to_text(tmp_path):
+    voice = tmp_path / "voice.wav"
+    voice.write_bytes(b"RIFF" + b"\x00" * 36)
+    output = tmp_path / "out.wav"
+
+    fake_wav = torch.randn(1, 22050)
+    fake_model = MagicMock()
+    fake_model.generate.return_value = fake_wav
+    fake_model.sr = 22050
+
+    with patch("tts_vc.engine.ChatterboxTTS") as mock_cls:
+        mock_cls.from_pretrained.return_value = fake_model
+        with patch("sys.argv", ["tts", str(voice), "Hello", "--tags", "laugh", "-o", str(output)]):
+            from tts_vc.cli import main
+            main()
+
+    text_arg = fake_model.generate.call_args.args[0]
+    assert "[laugh]" in text_arg
+
+
+def test_main_multilingual_passes_language_id(tmp_path):
+    voice = tmp_path / "voice.wav"
+    voice.write_bytes(b"RIFF" + b"\x00" * 36)
+    output = tmp_path / "out.wav"
+
+    fake_wav = torch.randn(1, 22050)
+    fake_model = MagicMock()
+    fake_model.generate.return_value = fake_wav
+    fake_model.sr = 22050
+
+    with patch("tts_vc.engine.ChatterboxMultilingualTTS") as mock_cls:
+        mock_cls.from_pretrained.return_value = fake_model
+        with patch("sys.argv", [
+            "tts", str(voice), "Bonjour", "--model", "multilingual", "-l", "fr", "-o", str(output)
+        ]):
+            from tts_vc.cli import main
+            main()
+
+    call_kwargs = fake_model.generate.call_args.kwargs
+    assert call_kwargs["language_id"] == "fr"

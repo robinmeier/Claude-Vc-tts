@@ -20,6 +20,15 @@ WHISPER_OVERRIDES = {
     "temperature": 0.4,
 }
 
+MULTILINGUAL_LANGUAGES = {
+    "ar": "Arabic", "da": "Danish", "de": "German", "el": "Greek",
+    "en": "English", "es": "Spanish", "fi": "Finnish", "fr": "French",
+    "he": "Hebrew", "hi": "Hindi", "it": "Italian", "ja": "Japanese",
+    "ko": "Korean", "ms": "Malay", "nl": "Dutch", "no": "Norwegian",
+    "pl": "Polish", "pt": "Portuguese", "ru": "Russian", "sv": "Swedish",
+    "sw": "Swahili", "tr": "Turkish", "zh": "Chinese",
+}
+
 
 def detect_device() -> str:
     """Return the best available device: mps, cuda, or cpu."""
@@ -48,11 +57,16 @@ def _patch_perth() -> None:
         pass
 
 
-def load_model(device: str) -> "ChatterboxTTS":
-    """Load ChatterboxTTS from HuggingFace (downloads ~2GB on first run)."""
+def load_model(device: str, multilingual: bool = False):
+    """Load ChatterboxTTS or ChatterboxMultilingualTTS from HuggingFace."""
     _patch_perth()
     try:
-        from chatterbox.tts import ChatterboxTTS
+        if multilingual:
+            from chatterbox import ChatterboxMultilingualTTS
+            return ChatterboxMultilingualTTS.from_pretrained(device=device)
+        else:
+            from chatterbox.tts import ChatterboxTTS
+            return ChatterboxTTS.from_pretrained(device=device)
     except ImportError:
         print(
             "Error: chatterbox-tts is not installed.\n"
@@ -60,7 +74,6 @@ def load_model(device: str) -> "ChatterboxTTS":
             file=sys.stderr,
         )
         sys.exit(1)
-    return ChatterboxTTS.from_pretrained(device=device)
 
 
 def resolve_params(
@@ -84,7 +97,7 @@ def resolve_params(
 
 
 def synthesize(
-    model: "ChatterboxTTS",
+    model,
     text: str,
     audio_prompt_path: str,
     exaggeration: float,
@@ -93,8 +106,10 @@ def synthesize(
     min_p: float = 0.05,
     top_p: float = 1.0,
     repetition_penalty: float = 1.2,
+    language_id: str | None = None,
 ) -> tuple[torch.Tensor, int]:
     """Generate speech and return (wav_tensor, sample_rate)."""
+    extra = {"language_id": language_id} if language_id is not None else {}
     wav = model.generate(
         text,
         audio_prompt_path=audio_prompt_path,
@@ -104,5 +119,6 @@ def synthesize(
         min_p=min_p,
         top_p=top_p,
         repetition_penalty=repetition_penalty,
+        **extra,
     )
     return wav, model.sr

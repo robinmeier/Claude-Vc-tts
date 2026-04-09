@@ -4,10 +4,41 @@ Usage:
     uv run tts sourcevoice.wav speech.txt
     uv run tts sourcevoice.wav "Hello world" -e 0.8 -o out.wav
     uv run tts sourcevoice.wav speech.txt --whisper
+    uv run tts sourcevoice.wav "Bonjour le monde" --model multilingual -l fr
+    uv run tts --list-tags
 """
 
 import sys
 from pathlib import Path
+
+from tts_vc.engine import MULTILINGUAL_LANGUAGES
+
+PARALINGUISTIC_TAGS = {
+    "laugh": "[laugh]",
+    "chuckle": "[chuckle]",
+    "sigh": "[sigh]",
+    "cough": "[cough]",
+    "whisper": "[whisper]",
+    "clear_throat": "[clears throat]",
+    "breath": "[breath]",
+    "hesitation": "[hesitation]",
+}
+
+
+def build_text(text: str, tags: list[str] | None) -> str:
+    """Append requested paralinguistic tags to the text."""
+    if not tags:
+        return text
+    tag_strs = []
+    for tag in tags:
+        if tag in PARALINGUISTIC_TAGS:
+            tag_strs.append(PARALINGUISTIC_TAGS[tag])
+        else:
+            print(
+                f"Warning: unknown tag '{tag}', ignoring. Run --list-tags to see valid options.",
+                file=sys.stderr,
+            )
+    return (text + " " + " ".join(tag_strs)).rstrip() if tag_strs else text
 
 
 def build_parser():
@@ -22,17 +53,27 @@ Examples:
   uv run tts voice.wav speech.txt
   uv run tts voice.wav "Hello world" -e 0.9 -o out.wav
   uv run tts voice.wav speech.txt --whisper -o whisper.wav
-  uv run tts voice.wav speech.txt -e 1.5 -c 0.3 -t 1.2 -s 0.9
+  uv run tts voice.wav "That's funny" --tags laugh -o funny.wav
+  uv run tts voice.wav "Bonjour le monde" --model multilingual -l fr
+  uv run tts --list-tags
         """,
+    )
+
+    parser.add_argument(
+        "--list-tags",
+        action="store_true",
+        help="Print available paralinguistic tags and exit.",
     )
 
     parser.add_argument(
         "source_voice",
         type=Path,
+        nargs="?",
         help="Reference WAV file for voice cloning (10+ seconds recommended).",
     )
     parser.add_argument(
         "text",
+        nargs="?",
         help="Text to synthesize: path to .txt file or inline string.",
     )
     parser.add_argument(
@@ -75,6 +116,27 @@ Examples:
         help="Whisper mode: sets soft defaults for exaggeration, cfg-weight, and temperature.",
     )
     parser.add_argument(
+        "--model",
+        choices=["standard", "multilingual"],
+        default="standard",
+        help="Model to use: standard (English, default) or multilingual (23 languages).",
+    )
+    parser.add_argument(
+        "-l", "--language",
+        default="en",
+        metavar="CODE",
+        help=(
+            "Language code for --model multilingual (default: en). "
+            f"Supported: {', '.join(sorted(MULTILINGUAL_LANGUAGES))}."
+        ),
+    )
+    parser.add_argument(
+        "--tags",
+        nargs="+",
+        metavar="TAG",
+        help="Append paralinguistic tags to text (e.g. --tags laugh sigh). See --list-tags.",
+    )
+    parser.add_argument(
         "--device",
         choices=["cpu", "cuda", "mps", "auto"],
         default="auto",
@@ -108,6 +170,10 @@ Examples:
 
 
 def validate_args(args, parser) -> None:
+    if args.list_tags:
+        return
+    if not args.source_voice or not args.text:
+        parser.error("source_voice and text are required (or use --list-tags).")
     if not args.source_voice.exists():
         parser.error(f"Source voice file not found: {args.source_voice}")
     if args.source_voice.suffix.lower() != ".wav":
@@ -120,6 +186,11 @@ def validate_args(args, parser) -> None:
         parser.error("--temperature must be between 0.05 and 5.0")
     if not (0.5 <= args.speed <= 2.0):
         parser.error("--speed must be between 0.5 and 2.0")
+    if args.model == "multilingual" and args.language not in MULTILINGUAL_LANGUAGES:
+        parser.error(
+            f"Unknown language code '{args.language}'. "
+            f"Supported: {', '.join(sorted(MULTILINGUAL_LANGUAGES))}."
+        )
 
 
 def load_text(text_arg: str) -> str:
@@ -137,18 +208,32 @@ def load_text(text_arg: str) -> str:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
+
+    if args.list_tags:
+        print("Available paralinguistic tags (use with --tags or inline in text):")
+        for name, tag in PARALINGUISTIC_TAGS.items():
+            print(f"  {name:<15} -> {tag}")
+        return
+
     validate_args(args, parser)
 
     text = load_text(args.text)
+    text = build_text(text, args.tags)
 
     # Deferred imports: keeps `uv run tts --help` instant (torch takes ~3s to import)
     from tts_vc.engine import detect_device, load_model, resolve_params, synthesize
     from tts_vc.audio import apply_speed, normalize_loudness, save_wav
 
     device = detect_device() if args.device == "auto" else args.device
+    multilingual = args.model == "multilingual"
 
-    print(f"Loading Chatterbox model on {device}... (first run downloads ~2 GB)", file=sys.stderr)
-    model = load_model(device)
+    model_label = f"Chatterbox {'Multilingual' if multilingual else 'Standard'}"
+    print(f"Loading {model_label} model on {device}... (first run downloads ~2 GB)", file=sys.stderr)
+    model = load_model(device, multilingual=multilingual)
+
+    if multilingual:
+        lang_name = MULTILINGUAL_LANGUAGES.get(args.language, args.language)
+        print(f"Language: {args.language} ({lang_name})", file=sys.stderr)
 
     params = resolve_params(
         exaggeration=args.exaggeration,
@@ -172,6 +257,7 @@ def main() -> None:
         min_p=args.min_p,
         top_p=args.top_p,
         repetition_penalty=args.repetition_penalty,
+        language_id=args.language if multilingual else None,
     )
 
     if args.speed != 1.0:
