@@ -78,17 +78,17 @@ advanced:
 
 ### Basic voice cloning
 ```bash
-uv run tts speaker.wav "I cannot believe it happened."
+uv run tts speaker.wav "My hovercraft is full of eels."
 ```
 
 ### High emotion
 ```bash
-uv run tts speaker.wav "This is incredible!" -e 1.5 -c 0.3 -o excited.wav
+uv run tts speaker.wav "Somebody kill this cucumber!" -e 1.5 -c 0.3 -o excited.wav
 ```
 
 ### Whisper mode
 ```bash
-uv run tts speaker.wav "Can you keep a secret?" --whisper -o secret.wav
+uv run tts speaker.wav "Where did you hide the money, Lebowski?" --whisper -o secret.wav
 ```
 
 ### Adjust speed
@@ -99,7 +99,7 @@ uv run tts speaker.wav speech.txt -s 0.85 -o slow.wav
 ### Paralinguistic tags
 ```bash
 # Add a laugh at the end
-uv run tts speaker.wav "That's the funniest thing I've heard" --tags laugh
+uv run tts speaker.wav "My belly is not a church organ, my dear fellow." --tags laugh
 
 # See all available tags
 uv run tts --list-tags
@@ -112,13 +112,13 @@ Tags can also be embedded directly in text: `"That was hilarious [laugh] I can't
 ### Multilingual (23 languages)
 ```bash
 # French
-uv run tts speaker.wav "Bonjour, comment allez-vous ?" --model multilingual -l fr
+uv run tts speaker.wav "Bonjour Pierre, avez-vous vu mon marteau, Maître ?" --model multilingual -l fr
 
 # Japanese
 uv run tts speaker.wav "こんにちは、元気ですか？" --model multilingual -l ja
 
 # German
-uv run tts speaker.wav "Guten Morgen, wie geht es Ihnen?" --model multilingual -l de
+uv run tts speaker.wav "Guten Morgen Karlheinz. Bitte sing mir dein Mantra?" --model multilingual -l de
 ```
 
 Supported language codes: `ar` `da` `de` `el` `en` `es` `fi` `fr` `he` `hi` `it` `ja` `ko` `ms` `nl` `no` `pl` `pt` `ru` `sv` `sw` `tr` `zh`
