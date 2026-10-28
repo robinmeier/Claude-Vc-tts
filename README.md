@@ -17,13 +17,10 @@ emotion, pacing, and style. Built on [Chatterbox TTS](https://github.com/resembl
 git clone https://github.com/robinmeier/Claude-Vc-tts.git
 cd Claude-Vc-tts
 
-# 2. Check out the working branch
-git checkout claude/voice-cloning-tts-research-lbiXt
-
-# 3. Install dependencies (creates a .venv automatically)
+# 2. Install dependencies (creates a .venv automatically)
 uv sync
 
-# 4. Verify
+# 3. Verify
 uv run tts --help
 ```
 
